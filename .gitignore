@@ -1,4 +1,33 @@
 
+# Video files (large media)
 *.mp4
 *.mov
 *.avi
+
+# Python virtual environments & bytecode
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Node / Frontend build artifacts
+node_modules/
+dist/
+build/
+
+# Environment variables & secrets
+.env
+.env.local
+
+# Logs & generated artifacts
+*.log
+reports/generated/
+evidence/generated/
+
