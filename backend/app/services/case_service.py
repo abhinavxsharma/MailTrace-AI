@@ -1,13 +1,14 @@
 """
-Case management service handling case creation, retrieval, and status updates.
+Case management service handling case creation, retrieval, evidence linkage, and status updates.
 """
 
 import json
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.models.case import Case
+from app.models.evidence import Evidence
 from app.models.audit_event import AuditEvent
 from app.schemas.case import CaseStatus
 from app.schemas.analysis import CaseDetailResponse
@@ -66,6 +67,38 @@ def get_case(db: Session, case_id: str) -> Optional[Case]:
     return case
 
 
+def attach_evidence(
+    db: Session,
+    case: Case,
+    filename: str,
+    path: str,
+    sha256: str,
+    size_bytes: int,
+    evidence_type: str = "raw_eml",
+) -> Evidence:
+    """Attach preserved evidence record to the case and log audit event."""
+    evidence = Evidence(
+        case_id=case.id,
+        evidence_type=evidence_type,
+        filename=filename,
+        path=str(path),
+        sha256=sha256,
+        size_bytes=size_bytes,
+    )
+    db.add(evidence)
+    db.flush()
+
+    audit = AuditEvent(
+        case_id=case.id,
+        event_type="EVIDENCE_PRESERVED",
+        description=f"Preserved {evidence_type} artifact '{filename}' (SHA-256: {sha256}).",
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(evidence)
+    return evidence
+
+
 def update_case_status(
     db: Session,
     case: Case,
@@ -116,7 +149,7 @@ def update_case_analysis(
 
 def case_to_response(case: Case) -> CaseDetailResponse:
     """Convert a database Case model into the canonical CaseDetailResponse contract."""
-    data = {}
+    data: Dict[str, Any] = {}
     if case.analysis_json:
         try:
             data = json.loads(case.analysis_json)
@@ -129,6 +162,17 @@ def case_to_response(case: Case) -> CaseDetailResponse:
             classification_val = RiskClassification(case.classification)
         except ValueError:
             classification_val = None
+
+    # Derive evidence payload if not explicitly present in analysis data
+    evidence_payload = data.get("evidence", {})
+    if not evidence_payload and case.evidences:
+        latest = case.evidences[-1]
+        evidence_payload = {
+            "sha256": latest.sha256,
+            "size_bytes": latest.size_bytes,
+            "filename": latest.filename,
+            "path": latest.path,
+        }
 
     return CaseDetailResponse(
         case_id=case.case_number,
@@ -145,7 +189,7 @@ def case_to_response(case: Case) -> CaseDetailResponse:
         risk_dimensions=data.get("risk_dimensions", RiskDimensions()),
         reasons=data.get("reasons", []),
         graph=data.get("graph", GraphResponse()),
-        evidence=data.get("evidence", {}),
+        evidence=evidence_payload,
         created_at=case.created_at,
         updated_at=case.updated_at,
     )

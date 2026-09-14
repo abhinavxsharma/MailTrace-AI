@@ -29,5 +29,8 @@ build/
 # Logs & generated artifacts
 *.log
 reports/generated/
+reports/*/
 evidence/generated/
+evidence/*/
+
 

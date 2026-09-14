@@ -1,0 +1,25 @@
+From: Finance Office <finance@acme.edu>
+To: accounts@acme.edu
+Date: Thu, 03 Sep 2026 08:30:00 +0000
+Subject: Monthly expense report — September
+Reply-To: finance@acme.edu
+Return-Path: <finance@acme.edu>
+Message-ID: <sep-report-2026@acme.edu>
+MIME-Version: 1.0
+Content-Type: text/html; charset="UTF-8"
+Authentication-Results: mail.acme.edu;
+    spf=pass smtp.mailfrom=acme.edu;
+    dkim=pass header.d=acme.edu;
+    dmarc=pass header.from=acme.edu
+Received: from internal-mail.acme.edu (192.0.2.44)
+    by mail.acme.edu with ESMTPS id GHI789
+    Thu, 03 Sep 2026 14:00:00 +0530
+
+<html>
+  <body>
+    <p>Hello team,</p>
+    <p>The September monthly expense report is attached for your departmental review.</p>
+    <p>Please use the normal internal finance portal if you need to submit any line-item adjustments.</p>
+    <p>Regards,<br>Finance Office<br>Acme University</p>
+  </body>
+</html>

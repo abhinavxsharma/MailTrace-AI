@@ -45,3 +45,17 @@ class CaseSummaryResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CaseUploadEvidence(BaseModel):
+    sha256: str
+    size_bytes: int
+
+
+class CaseUploadResponse(BaseModel):
+    case_id: str
+    status: CaseStatus = CaseStatus.PARSED
+    evidence: CaseUploadEvidence
+
+    model_config = ConfigDict(from_attributes=True)
+

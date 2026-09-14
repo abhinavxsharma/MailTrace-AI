@@ -10,12 +10,18 @@ from app.schemas.case import (
     CaseTestCreate,
     CaseTestResponse,
     CaseSummaryResponse,
+    CaseUploadEvidence,
+    CaseUploadResponse,
 )
 from app.schemas.email import EmailSchema
 from app.schemas.verification import (
     AuthStatus,
     AuthenticationSchema,
     IdentitySchema,
+    AlignmentStatus,
+    DeclaredAuth,
+    VerifiedAuth,
+    CaseVerifyResponse,
 )
 from app.schemas.indicator import IndicatorSchema
 from app.schemas.infrastructure import InfrastructureSchema
@@ -44,10 +50,16 @@ __all__ = [
     "CaseTestCreate",
     "CaseTestResponse",
     "CaseSummaryResponse",
+    "CaseUploadEvidence",
+    "CaseUploadResponse",
     "EmailSchema",
     "AuthStatus",
     "AuthenticationSchema",
     "IdentitySchema",
+    "AlignmentStatus",
+    "DeclaredAuth",
+    "VerifiedAuth",
+    "CaseVerifyResponse",
     "IndicatorSchema",
     "InfrastructureSchema",
     "DetectionSignal",
