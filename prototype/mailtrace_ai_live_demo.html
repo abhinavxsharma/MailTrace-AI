@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MAILTRACE AI — Live Investigation</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+:root{--ink:#202124;--muted:#6b7280;--line:#dadce0;--blue:#1a73e8;--soft:#f8f9fa}
+*{box-sizing:border-box} body{margin:0;font-family:Inter,Arial,sans-serif;background:#f6f8fb;color:var(--ink)}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px}
+.gmail{box-shadow:0 1px 2px rgba(60,64,67,.15)}
+.row{transition:.15s}.row:hover{background:#f5f7f7}.unread{font-weight:600}
+.pulseDot{animation:pulse 1.1s infinite}@keyframes pulse{50%{opacity:.35}}
+.progress{transition:width .55s cubic-bezier(.2,.8,.2,1)}
+.step{transition:.3s}.step.running{border-color:#5f6368;background:#fafafa;box-shadow:0 4px 18px rgba(0,0,0,.05)}
+.step.done{border-color:#c9e2cc;background:#fbfffb}.step.done .num{background:#188038;color:white}
+.step.error{border-color:#f3b7b7;background:#fffafa}.step.error .num{background:#d93025;color:white}
+.fade{animation:fade .35s ease}@keyframes fade{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.modal{background:rgba(32,33,36,.45)}
+.graphLine{stroke:#9aa0a6;stroke-width:2;stroke-dasharray:6 7;animation:dash 1.8s linear infinite}
+@keyframes dash{to{stroke-dashoffset:-26}}
+.nodeGlow{filter:drop-shadow(0 0 8px rgba(26,115,232,.18))}
+.mapPulse{animation:mappulse 1.7s infinite}@keyframes mappulse{0%{opacity:.2}50%{opacity:.8}100%{opacity:.2}}
+.toast{animation:toast .25s ease}@keyframes toast{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+
+/* ENHANCED MAILTRACE UI */
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace}
+.xai-bar{height:8px;border-radius:999px;background:#eef1f5;overflow:hidden}.xai-fill{height:100%;border-radius:999px;transition:width .7s ease}.xai-row{transition:.2s}.xai-row:hover{transform:translateX(2px);background:#fafafa}.signal-good{background:#ecfdf3;color:#087443}.signal-bad{background:#fff1f2;color:#b42318}.signal-warn{background:#fff8eb;color:#9a6700}
+.arch-line{stroke:#94a3b8;stroke-width:2;stroke-dasharray:8 7;animation:dash2 2.2s linear infinite}@keyframes dash2{to{stroke-dashoffset:-30}}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+.floaty{animation:floaty 2s ease-in-out infinite}
+</style>
+</head>
+<body>
+
+<!-- GMAIL SIMULATION -->
+<section id="gmailView">
+  <header class="h-16 bg-white border-b flex items-center gap-4 px-4 sticky top-0 z-40">
+    <div class="text-xl text-slate-500">☰</div>
+    <div class="flex items-center gap-2 min-w-[185px]">
+      <div class="text-2xl">✉</div><div class="text-xl text-slate-600">Gmail <span class="text-xs text-slate-400">simulation</span></div>
+    </div>
+    <div class="hidden md:block flex-1 max-w-2xl rounded-full bg-slate-100 px-5 py-3 text-sm text-slate-500">Search mail</div>
+    <div class="ml-auto text-xs text-slate-500">MAILTRACE sandbox</div>
+  </header>
+  <div class="flex min-h-[calc(100vh-64px)]">
+    <aside class="hidden lg:block w-60 p-3">
+      <button class="gmail w-full rounded-2xl bg-white px-5 py-4 text-left text-sm mb-4">＋ Compose</button>
+      <div class="rounded-r-full bg-blue-50 px-4 py-2 text-sm">📥 Inbox <span class="float-right">3</span></div>
+      <div class="px-4 py-2 text-sm text-slate-600">⭐ Starred</div>
+      <div class="px-4 py-2 text-sm text-slate-600">🕘 Snoozed</div>
+      <div class="px-4 py-2 text-sm text-slate-600">📤 Sent</div>
+    </aside>
+    <main class="flex-1 p-5">
+      <div class="max-w-6xl mx-auto">
+        <div class="flex items-center justify-between mb-4">
+          <div><h1 class="text-xl font-semibold">Inbox</h1><p class="text-xs text-slate-500">A safe simulation of the incoming-mail experience</p></div>
+          <button id="incomingBtn" class="bg-slate-900 text-white rounded-lg px-4 py-2 text-sm hover:bg-slate-800">Simulate incoming mail</button>
+        </div>
+        <div class="card overflow-hidden">
+          <div class="px-4 py-3 border-b text-xs text-slate-500">☑ &nbsp; ↻ &nbsp; 1–3 of 3</div>
+          <div id="mailList">
+            <button class="row unread w-full text-left px-4 py-4 border-b flex gap-3 items-center" data-mail="bec">
+              <span class="text-slate-400">☆</span><span class="w-48 truncate">CFO — Acme Finance</span>
+              <span class="flex-1 truncate"><b>URGENT: Change Vendor Bank Account Today</b> — Please process the transfer immediately…</span>
+              <span class="text-xs text-slate-500">10:19</span>
+            </button>
+            <button class="row w-full text-left px-4 py-4 border-b flex gap-3 items-center" data-mail="phishing">
+              <span class="text-slate-400">☆</span><span class="w-48 truncate">Microsoft Security</span>
+              <span class="flex-1 truncate">Your account requires verification — review security activity…</span>
+              <span class="text-xs text-slate-500">09:41</span>
+            </button>
+            <button class="row w-full text-left px-4 py-4 flex gap-3 items-center" data-mail="legitimate">
+              <span class="text-slate-400">☆</span><span class="w-48 truncate">Finance Office</span>
+              <span class="flex-1 truncate">Monthly expense report — September</span>
+              <span class="text-xs text-slate-500">Yesterday</span>
+            </button>
+          </div>
+        </div>
+        <div class="mt-4 text-xs text-slate-400">Demo note: this does not connect to a real Gmail account. It mimics the user journey for the future Gmail API connector.</div>
+      </div>
+    </main>
+  </div>
+</section>
+
+<!-- MAIL READER -->
+<section id="readerView" class="hidden min-h-screen">
+  <header class="h-16 bg-white border-b flex items-center px-4 gap-4 sticky top-0 z-40">
+    <button id="backInbox" class="text-xl text-slate-600 hover:text-slate-900">←</button>
+    <div class="text-xl text-slate-600">Gmail <span class="text-xs text-slate-400">simulation</span></div>
+    <button id="incoming2" class="ml-auto border rounded-lg px-3 py-2 text-sm">Simulate another email</button>
+  </header>
+  <main class="max-w-5xl mx-auto p-5 md:p-8">
+    <div class="card p-6">
+      <div class="flex gap-4">
+        <div class="h-11 w-11 rounded-full bg-slate-200 flex items-center justify-center font-bold">C</div>
+        <div class="flex-1">
+          <h1 id="subject" class="text-2xl font-normal"></h1>
+          <div class="text-sm mt-2"><span id="from"></span> <span class="text-slate-500" id="meta"></span></div>
+        </div>
+        <button id="scanBtn" class="h-10 bg-slate-900 text-white rounded-lg px-4 text-sm font-semibold hover:bg-slate-800">Scan with MAILTRACE AI</button>
+      </div>
+      <div id="body" class="mt-8 max-w-3xl text-sm leading-7"></div>
+      <div class="mt-8 border-t pt-4 text-xs text-slate-400">Future production path: Gmail API / OAuth → secure ingestion → same forensic pipeline.</div>
+    </div>
+  </main>
+</section>
+
+<!-- SCANNER -->
+<section id="scannerView" class="hidden min-h-screen">
+  <header class="h-16 bg-white border-b flex items-center justify-between px-5 sticky top-0 z-40">
+    <div><div class="font-semibold">MAILTRACE <span class="text-slate-500">AI</span></div><div class="text-[11px] text-slate-500">Live forensic analysis</div></div>
+    <div id="scanState" class="text-xs text-slate-500">Initializing…</div>
+  </header>
+  <main class="max-w-7xl mx-auto p-5">
+    <div class="grid xl:grid-cols-[1fr_360px] gap-5">
+      <section class="card p-5">
+        <div class="flex justify-between items-end">
+          <div><div class="text-xs uppercase tracking-wider text-slate-400">Analyzing message</div><h2 id="scanSubject" class="text-xl font-semibold mt-1"></h2></div>
+          <div class="text-right"><div id="pct" class="text-3xl font-bold">0%</div><div class="text-[11px] text-slate-400">complete</div></div>
+        </div>
+        <div class="mt-4 h-2 bg-slate-100 rounded-full overflow-hidden"><div id="bar" class="progress h-full bg-slate-900 w-0"></div></div>
+        <div id="steps" class="mt-5 space-y-2"></div>
+        <div id="console" class="mt-5 bg-slate-950 text-slate-300 rounded-xl p-4 h-36 overflow-auto mono text-[11px] leading-5"></div>
+      </section>
+      <aside class="card p-5">
+        <div class="text-xs uppercase tracking-wider text-slate-400">Live findings</div>
+        <div id="findings" class="mt-3 space-y-2"></div>
+        <div class="mt-5 pt-5 border-t">
+          <div class="text-xs text-slate-400">Pipeline health</div>
+          <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div class="border rounded-lg p-3">Core engine<br><b class="text-green-700">Online</b></div>
+            <div class="border rounded-lg p-3">Threat intel<br><b class="text-green-700">Available</b></div>
+            <div class="border rounded-lg p-3">Evidence store<br><b class="text-green-700">Ready</b></div>
+            <div class="border rounded-lg p-3">Graph engine<br><b class="text-green-700">Ready</b></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</section>
+
+<!-- RESULT -->
+<section id="resultView" class="hidden min-h-screen">
+  <header class="h-16 bg-white border-b flex items-center justify-between px-5 sticky top-0 z-40">
+    <div><div class="font-semibold">MAILTRACE <span class="text-slate-500">AI</span></div><div class="text-[11px] text-slate-500">Investigation case</div></div>
+    <button id="resultHome" class="border rounded-lg px-3 py-2 text-sm">Back to Gmail</button>
+  </header>
+  <main class="max-w-7xl mx-auto p-5">
+    <div class="grid xl:grid-cols-[1.2fr_.8fr] gap-5">
+      <section class="card p-5">
+        <div class="flex flex-col md:flex-row justify-between md:items-end gap-4">
+          <div>
+            <div class="text-xs uppercase tracking-wider text-slate-400">Analysis complete</div>
+            <h1 id="verdict" class="text-2xl font-bold mt-1"></h1>
+            <div class="text-sm text-slate-500 mt-1">CASE-26106-00042 • SHA-256 evidence captured</div>
+          </div>
+          <div class="text-right"><div class="text-xs text-slate-400">Risk score</div><div id="risk" class="text-5xl font-bold"></div></div>
+        </div>
+
+        <div id="cards" class="grid md:grid-cols-3 gap-3 mt-5"></div>
+
+        <div class="mt-5 grid lg:grid-cols-2 gap-5">
+          <div><h2 class="font-semibold">Why?</h2><div id="reasons" class="mt-3 space-y-2"></div></div>
+          <div><h2 class="font-semibold">Authentication</h2><div id="auth" class="mt-3 border rounded-lg overflow-hidden"></div></div>
+        </div>
+      </section>
+
+      <section class="card p-5">
+        <div class="flex items-center justify-between">
+          <div><h2 class="font-semibold">Infrastructure map</h2><p class="text-xs text-slate-500">Observed network evidence</p></div>
+          <span class="text-[11px] rounded-full bg-slate-100 px-2 py-1">confidence aware</span>
+        </div>
+        <div class="mt-4 h-64 rounded-xl border bg-slate-50 relative overflow-hidden">
+          <svg viewBox="0 0 600 260" class="absolute inset-0 h-full w-full">
+            <path d="M70 190 C180 70 250 90 330 150 S480 70 540 45" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="7 8">
+              <animate attributeName="stroke-dashoffset" from="0" to="-30" dur="1.5s" repeatCount="indefinite"/>
+            </path>
+            <circle cx="70" cy="190" r="7" fill="#111827" class="mapPulse"/>
+            <circle cx="330" cy="150" r="7" fill="#111827"/>
+            <circle cx="540" cy="45" r="7" fill="#111827" class="mapPulse"/>
+          </svg>
+          <div class="absolute left-4 bottom-4 bg-white border rounded-lg px-3 py-2 text-xs shadow-sm"><b>198.51.100.42</b><div class="text-slate-500">Observed source</div></div>
+          <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white border rounded-lg px-3 py-2 text-xs shadow-sm"><b>relay-07.cloud</b><div class="text-slate-500">Relay</div></div>
+          <div class="absolute right-4 top-4 bg-white border rounded-lg px-3 py-2 text-xs shadow-sm"><b>mail.acme.edu</b><div class="text-slate-500">Recipient MTA</div></div>
+        </div>
+        <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+          <div class="border rounded-lg p-3"><span class="text-slate-500">Country</span><br><b>Germany*</b></div>
+          <div class="border rounded-lg p-3"><span class="text-slate-500">Network</span><br><b>Cloud / VPS</b></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="card p-5 mt-5">
+      <div class="flex items-center justify-between"><div><h2 class="font-semibold">Investigation relationships</h2><p class="text-xs text-slate-500">Animated graph — email to infrastructure to campaign</p></div><span class="text-xs text-slate-500">NetworkX MVP → Neo4j</span></div>
+      <div class="mt-4 h-72 rounded-xl border bg-slate-50 relative overflow-hidden">
+        <svg viewBox="0 0 1100 300" class="absolute inset-0 h-full w-full">
+          <line class="graphLine" x1="550" y1="150" x2="190" y2="70"/>
+          <line class="graphLine" x1="550" y1="150" x2="190" y2="230"/>
+          <line class="graphLine" x1="550" y1="150" x2="910" y2="70"/>
+          <line class="graphLine" x1="550" y1="150" x2="910" y2="230"/>
+        </svg>
+        <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 nodeGlow rounded-full border-2 border-slate-900 bg-white px-8 py-6 text-center shadow-sm">
+          <div class="text-[10px] uppercase tracking-wider text-slate-400">Current case</div><div class="font-bold">26106-00042</div>
+        </div>
+        <div class="absolute left-[10%] top-[12%] border rounded-xl bg-white px-4 py-3 shadow-sm"><div class="text-[10px] text-slate-400">DOMAIN</div><b>notify-acme.co</b></div>
+        <div class="absolute left-[10%] bottom-[12%] border rounded-xl bg-white px-4 py-3 shadow-sm"><div class="text-[10px] text-slate-400">URL</div><b>secure-acme-login</b></div>
+        <div class="absolute right-[10%] top-[12%] border rounded-xl bg-white px-4 py-3 shadow-sm"><div class="text-[10px] text-slate-400">IP / ASN</div><b>198.51.100.42</b></div>
+        <div class="absolute right-[10%] bottom-[12%] border rounded-xl bg-white px-4 py-3 shadow-sm"><div class="text-[10px] text-slate-400">CAMPAIGN</div><b>BEC-2026-017</b></div>
+      </div>
+    </section>
+    <section class="card p-5 mt-5">
+      <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+        <div>
+          <div class="text-xs uppercase tracking-wider text-slate-400">Explainable AI + forensic evidence</div>
+          <h2 class="text-xl font-semibold mt-1">Why MAILTRACE reached this verdict</h2>
+          <p class="text-xs text-slate-500 mt-1">Evidence is decomposed into understandable signals, scored, correlated and exposed to the investigator.</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button id="xaiBtn" class="bg-slate-900 text-white rounded-lg px-4 py-2 text-sm hover:bg-slate-800">Open Explainable AI</button>
+          <button id="architectureBtn" class="border rounded-lg px-4 py-2 text-sm hover:bg-slate-50">View architecture</button>
+          <button id="headersBtn" class="border rounded-lg px-4 py-2 text-sm hover:bg-slate-50">Raw headers</button>
+          <button id="routeBtn" class="border rounded-lg px-4 py-2 text-sm hover:bg-slate-50">Mail route</button>
+          <button id="reportBtn" class="bg-slate-900 text-white rounded-lg px-4 py-2 text-sm hover:bg-slate-800">Generate report</button>
+        </div>
+      </div>
+      <div class="grid lg:grid-cols-2 gap-5 mt-5">
+        <div class="border rounded-xl p-4">
+          <div class="flex items-center justify-between"><span class="text-sm font-semibold">Evidence contribution</span><span class="text-[11px] text-slate-500">weighted points</span></div>
+          <div id="xaiBars" class="mt-4 space-y-3"></div>
+        </div>
+        <div class="border rounded-xl p-4">
+          <div class="flex items-center justify-between"><span class="text-sm font-semibold">Decision path</span><span class="text-[11px] text-slate-500">transparent fusion</span></div>
+          <div class="mt-4 grid gap-2 text-xs">
+            <div class="p-3 rounded-lg bg-slate-50"><b>1 · Detect</b> &nbsp; NLP + structural signals</div>
+            <div class="p-3 rounded-lg bg-slate-50"><b>2 · Verify</b> &nbsp; SPF / DKIM / DMARC + alignment</div>
+            <div class="p-3 rounded-lg bg-slate-50"><b>3 · Trace</b> &nbsp; Received chain + infrastructure</div>
+            <div class="p-3 rounded-lg bg-slate-50"><b>4 · Correlate</b> &nbsp; Graph + campaign relationships</div>
+            <div class="p-3 rounded-lg bg-slate-50"><b>5 · Explain</b> &nbsp; evidence → score → reason</div>
+          </div>
+        </div>
+      </div>
+      <div class="mt-5 p-3 rounded-xl bg-slate-50 border text-xs text-slate-600"><b>Forensic safety:</b> observed infrastructure ≠ human identity; IP geolocation is an estimate and authentication success alone does not prove legitimacy.</div>
+    </section>
+  </main>
+</section>
+
+<!-- MODAL -->
+<div id="modal" class="hidden fixed inset-0 z-50 modal items-center justify-center p-4">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden">
+    <div class="flex items-center justify-between border-b p-4"><div><h3 id="mTitle" class="font-semibold"></h3><div id="mSub" class="text-xs text-slate-500"></div></div><button id="mClose" class="text-xl text-slate-400">×</button></div>
+    <div id="mBody" class="p-5 overflow-auto max-h-[75vh]"></div>
+  </div>
+</div>
+<div id="toast" class="hidden fixed top-20 right-5 z-[60] bg-slate-900 text-white rounded-lg px-4 py-3 text-sm shadow-lg"></div>
+
+<script>
+const DATA={
+bec:{subject:"URGENT: Change Vendor Bank Account Today",from:"CFO <cfo@acme-finance.com>",meta:"to accounts@acme.edu • 10:19",
+body:`<p>Hi Accounts Team,</p><p>This is an urgent request from the CFO.</p><p>We have changed our banking partner and the beneficiary account for the outstanding vendor invoice must be updated <b>today</b>.</p><p>Please process the transfer immediately using the finance portal: <a class="text-blue-600 underline" href="#">https://secure-acme-login.example/verify-invoice</a></p><p>Please do not call to confirm this request as I am in a meeting.</p><p>Regards,<br>CFO<br>Acme Finance</p>`,
+risk:91,verdict:"Critical — BEC / impersonation attempt",
+cards:[["Threat type","BEC / Impersonation"],["Authentication","DMARC FAIL"],["Source","Cloud / VPS"]],
+reasons:[["Reply-To mismatch","+18","Visible sender and reply destination use different identities."],["Suspicious domain","+15","Linked infrastructure does not match the claimed organization."],["DMARC alignment failure","+12","Authenticated domain does not align with visible From."],["BEC intent","+21","Urgency, authority, payment and secrecy patterns are present."],["Infrastructure","+11","Observed source infrastructure carries elevated risk signals."]],
+auth:[["SPF","PASS"],["DKIM","PASS"],["DMARC","FAIL"],["Reply-To","acme.invoice.alert@gmail.com"],["Observed IP","198.51.100.42"],["Geo","Germany / Frankfurt*"]],
+headers:`From: CFO <cfo@acme-finance.com>
+To: accounts@acme.edu
+Date: Thu, 03 Sep 2026 10:19:12 +0000
+Subject: URGENT: Change Vendor Bank Account Today
+Reply-To: acme.invoice.alert@gmail.com
+Return-Path: <billing@notify-acme.co>
+Message-ID: <20260903-26106-42@relay-07.cloud>
+Authentication-Results: mail.acme.edu;
+    spf=pass smtp.mailfrom=notify-acme.co;
+    dkim=pass header.d=notify-acme.co;
+    dmarc=fail header.from=acme-finance.com
+Received: from relay-07.cloud (198.51.100.42)
+    by mail.acme.edu with ESMTPS id ABC123`
+},
+phishing:{subject:"Security Alert: Verify Your Microsoft Account",from:"Microsoft Security <security@micros0ft-support.example>",meta:"to user@acme.edu • 09:41",
+body:`<p>Hello,</p><p>We detected unusual sign-in activity. Your account will be suspended within <b>2 hours</b> unless you verify your identity.</p><p><a class="text-blue-600 underline" href="#">https://microsoft-security-check.example/login</a></p><p>Failure to act will result in permanent account restrictions.</p>`,
+risk:87,verdict:"High — Credential phishing attempt",
+cards:[["Threat type","Credential phishing"],["URL","Suspicious"],["Source","New domain"]],
+reasons:[["Brand impersonation","+20","Sender presentation imitates a trusted service."],["Urgency","+17","Short deadline and suspension pressure are present."],["Suspicious URL","+18","Destination does not match the claimed service."],["Lookalike domain","+16","Sender domain visually resembles a trusted brand."],["New infrastructure","+10","Domain/infrastructure has limited history."]],
+auth:[["SPF","FAIL"],["DKIM","NONE"],["DMARC","FAIL"],["Reply-To","verify@micros0ft-support.example"],["Observed IP","203.0.113.80"],["Geo","United States*"]],
+headers:`From: Microsoft Security <security@micros0ft-support.example>
+To: user@acme.edu
+Subject: Security Alert: Verify Your Microsoft Account
+Reply-To: verify@micros0ft-support.example
+Message-ID: <security-alert-8842@micros0ft-support.example>
+Authentication-Results: mail.acme.edu;
+    spf=fail;
+    dkim=none;
+    dmarc=fail`
+},
+legitimate:{subject:"Monthly expense report — September",from:"Finance Office <finance@acme.edu>",meta:"to accounts@acme.edu • Yesterday",
+body:`<p>Hello team,</p><p>The September monthly expense report is attached for your review.</p><p>Please use the normal internal finance portal if you need to submit corrections.</p><p>Regards,<br>Finance Office</p>`,
+risk:8,verdict:"Low — No significant threat signals",
+cards:[["Threat type","Benign"],["Authentication","DMARC PASS"],["Source","Expected"]],
+reasons:[["Identity consistency","+0","Sender and reply identity are consistent."],["Authentication","+0","SPF/DKIM/DMARC align as expected."],["URL analysis","+0","No suspicious external destination detected."],["Language","+2","Normal operational communication."],["Infrastructure","+0","Expected organizational infrastructure."]],
+auth:[["SPF","PASS"],["DKIM","PASS"],["DMARC","PASS"],["Reply-To","finance@acme.edu"],["Observed IP","192.0.2.44"],["Geo","India*"]],
+headers:`From: Finance Office <finance@acme.edu>
+To: accounts@acme.edu
+Subject: Monthly expense report — September
+Reply-To: finance@acme.edu
+Message-ID: <sep-report-2026@acme.edu>
+Authentication-Results: mail.acme.edu;
+    spf=pass;
+    dkim=pass;
+    dmarc=pass`
+}};
+let current="bec";
+const $=id=>document.getElementById(id);
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const esc=s=>String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+function show(id){const e=$(id);if(e)e.classList.remove('hidden')}
+function hide(id){const e=$(id);if(e)e.classList.add('hidden')}
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.remove('hidden');clearTimeout(window.__toastTimer);window.__toastTimer=setTimeout(()=>t.classList.add('hidden'),2400)}
+function openMail(k){current=k;const d=DATA[k];$('subject').textContent=d.subject;$('from').textContent=d.from;$('meta').textContent=d.meta;$('body').innerHTML=d.body;hide('gmailView');show('readerView')}
+function openHome(){hide('readerView');hide('scannerView');hide('resultView');show('gmailView')}
+document.querySelectorAll('[data-mail]').forEach(b=>b.addEventListener('click',()=>openMail(b.dataset.mail)));
+$('backInbox').onclick=openHome;$('resultHome').onclick=openHome;
+$('incomingBtn').onclick=()=>{const n=document.createElement('button');n.type='button';n.className='row unread fade w-full text-left px-4 py-4 border-b flex gap-3 items-center';n.innerHTML='<span class="text-slate-400">☆</span><span class="w-48 truncate">External Vendor</span><span class="flex-1 truncate"><b>Payment account verification required</b> — action requested…</span><span class="text-xs text-slate-500">now</span>';n.onclick=()=>openMail('bec');$('mailList').prepend(n);toast('New simulated suspicious message received')};
+$('incoming2').onclick=()=>{openHome();setTimeout(()=>$('incomingBtn').click(),80)};
+function buildSteps(){const names=[['Preserve evidence','SHA-256 + evidence ID'],['Parse email','MIME + headers + Received chain'],['Check authentication','SPF + DKIM + DMARC + alignment'],['Extract indicators','URLs + domains + IPs + attachments'],['Run AI analysis','Phishing + BEC + semantic signals'],['Enrich infrastructure','DNS + RDAP + GeoIP + reputation'],['Correlate + score','Graph + campaign + risk fusion']];$('steps').innerHTML=names.map((n,i)=>`<div class="step waiting border rounded-xl p-3" data-i="${i}"><div class="flex items-center gap-3"><span class="num w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold">${i+1}</span><div class="flex-1"><div class="text-sm font-medium">${n[0]}</div><div class="text-xs text-slate-500">${n[1]}</div></div><span class="status text-xs text-slate-400">Waiting</span></div></div>`).join('')}
+function log(t){const d=document.createElement('div');d.textContent='$ '+t;$('console').appendChild(d);$('console').scrollTop=$('console').scrollHeight}
+function addFinding(t,kind=''){const d=document.createElement('div');d.className=`border rounded-lg p-3 text-xs fade ${kind==='bad'?'signal-bad':kind==='good'?'signal-good':kind==='warn'?'signal-warn':''}`;d.textContent=t;$('findings').appendChild(d)}
+async function scan(){const d=DATA[current];hide('readerView');hide('resultView');show('scannerView');$('scanSubject').textContent=d.subject;$('scanState').textContent='Running';$('bar').style.width='0%';$('pct').textContent='0%';$('console').innerHTML='<div class="text-slate-500">$ starting secure analysis…</div>';$('findings').innerHTML='';buildSteps();const messages=['capturing evidence fingerprint','parsing MIME and forensic headers','evaluating authentication + alignment','extracting URLs, domains, IPs and attachments','running phishing / BEC semantic model','enriching IP / DNS / RDAP / GeoIP signals','building graph relationships + evidence-fused risk'];for(let i=0;i<messages.length;i++){const s=document.querySelector(`[data-i="${i}"]`),st=s.querySelector('.status');s.classList.remove('waiting');s.classList.add('running');st.textContent='Running';log(messages[i]);if(i===0)addFinding('Evidence fingerprint captured','good');if(i===2)addFinding(`Authentication: SPF ${d.auth[0][1]} · DKIM ${d.auth[1][1]} · DMARC ${d.auth[2][1]}`,d.risk>50?'bad':'good');if(i===3)addFinding('IOC extraction complete','good');if(i===4)addFinding('Semantic + structural AI signals fused',d.risk>50?'warn':'good');if(i===5)addFinding('Infrastructure enrichment complete','good');if(i===6)addFinding('Campaign correlation complete',d.risk>50?'bad':'good');const pct=Math.round((i+1)/messages.length*100);$('bar').style.width=pct+'%';$('pct').textContent=pct+'%';await sleep(620);s.classList.remove('running');s.classList.add('done');st.textContent='Complete';st.className='status text-xs text-green-700 font-medium'}$('scanState').textContent='Complete';log('final evidence-fused score: '+d.risk+'/100');await sleep(420);renderResult()}
+function renderResult(){const d=DATA[current];hide('scannerView');show('resultView');$('confidenceNote')?.remove();$('verdict').textContent=d.verdict;$('risk').textContent=d.risk+'/100';$('risk').className='text-5xl font-bold '+(d.risk>=80?'text-red-600':d.risk>=50?'text-amber-600':'text-slate-900');$('cards').innerHTML=d.cards.map(c=>`<div class="border rounded-xl bg-slate-50 p-4"><div class="text-[11px] uppercase tracking-wider text-slate-400">${esc(c[0])}</div><div class="font-semibold mt-1">${esc(c[1])}</div></div>`).join('');$('reasons').innerHTML=d.reasons.map((r,i)=>`<button type="button" class="xai-row w-full text-left border rounded-lg p-3 hover:bg-slate-50" onclick="openReason(${i})"><div class="flex justify-between"><span class="font-medium">${esc(r[0])}</span><b>${esc(r[1])}</b></div><div class="text-xs text-slate-500 mt-1">${esc(r[2])}</div><div class="text-[10px] text-slate-400 mt-2">Inspect evidence contribution →</div></button>`).join('');$('auth').innerHTML=d.auth.map(r=>`<div class="flex justify-between gap-3 p-3 border-b last:border-0 text-sm"><span class="text-slate-500">${esc(r[0])}</span><span class="font-medium text-right">${esc(r[1])}</span></div>`).join('');renderXAIBars();const note=document.createElement('div');note.id='confidenceNote';note.className='text-[11px] mt-2 text-slate-500';note.textContent=`Decision confidence: ${d.risk>=80?'High':d.risk>=50?'Medium':'High'} · simulation`;$('risk').parentElement.appendChild(note)}
+function renderXAIBars(){const d=DATA[current];let raw=[['BEC / intent',d.reasons.find(r=>r[0].toLowerCase().includes('bec intent'))?.[1]||'+0'],['Identity mismatch',d.reasons.find(r=>r[0].toLowerCase().includes('reply'))?.[1]||'+0'],['Domain / URL',d.reasons.find(r=>r[0].toLowerCase().includes('domain')||r[0].toLowerCase().includes('url'))?.[1]||'+0'],['Authentication',d.reasons.find(r=>r[0].toLowerCase().includes('dmarc')||r[0].toLowerCase().includes('auth'))?.[1]||'+0'],['Infrastructure',d.reasons.find(r=>r[0].toLowerCase().includes('infrastructure'))?.[1]||'+0']];const rows=raw.map(([k,v])=>[k,Math.max(0,parseInt(String(v).replace('+',''))||0)]);$('xaiBars').innerHTML=rows.map(([k,v])=>`<div class="xai-row"><div class="flex justify-between text-xs mb-1"><span>${esc(k)}</span><b>+${v}</b></div><div class="xai-bar"><div class="xai-fill ${v>=18?'bg-red-500':v>=12?'bg-amber-500':'bg-slate-500'}" style="width:${Math.min(100,v*4)}%"></div></div></div>`).join('')+`<div class="pt-3 border-t mt-3 flex justify-between text-sm"><span class="font-semibold">Final evidence-fused risk</span><b>${d.risk}/100</b></div>`}
+function modal(title,sub,body){$('mTitle').textContent=title;$('mSub').textContent=sub;$('mBody').innerHTML=body;$('modal').classList.remove('hidden');$('modal').classList.add('flex')}
+function closeModal(){hide('modal');$('modal').classList.remove('flex')}
+function openReason(i){const d=DATA[current],r=d.reasons[i]||d.reasons[0];modal('Explainable AI — Evidence contribution',r[0],`<div class="space-y-4"><div class="rounded-xl border bg-slate-50 p-5"><div class="text-xs uppercase tracking-wider text-slate-400">Contribution to risk</div><div class="text-4xl font-bold mt-1">${esc(r[1])}</div><p class="text-sm text-slate-600 mt-2">${esc(r[2])}</p></div><div class="border rounded-xl p-4"><div class="font-semibold">Evidence chain</div><div class="grid gap-2 mt-3 text-xs"><div class="p-3 bg-slate-50 rounded-lg">Raw evidence → feature extraction</div><div class="p-3 bg-slate-50 rounded-lg">Feature → weighted contribution</div><div class="p-3 bg-slate-50 rounded-lg">Contribution → evidence-fused risk</div></div></div><div class="text-xs text-slate-500">Production implementation can attach the exact header, DNS, URL, authentication or model-feature evidence to this explanation.</div></div>`)}
+$('mClose').onclick=closeModal;$('modal').onclick=e=>{if(e.target===$('modal'))closeModal()};document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+$('headersBtn').onclick=()=>modal('Raw email headers','Preserved source artifact',`<pre class="bg-slate-950 text-slate-200 rounded-lg p-4 text-xs leading-5 overflow-auto mono">${esc(DATA[current].headers)}</pre><div class="mt-3 text-xs text-slate-500">Evidence integrity: SHA-256 fingerprint + timestamp in the production evidence store.</div>`);
+$('routeBtn').onclick=()=>modal('Observed mail route','Transport evidence',`<div class="grid md:grid-cols-3 gap-4 relative"><div class="border rounded-xl p-4 text-center floaty"><b>198.51.100.42</b><div class="text-xs text-slate-500 mt-1">Observed source</div></div><div class="border rounded-xl p-4 text-center floaty"><b>relay-07.cloud</b><div class="text-xs text-slate-500 mt-1">External relay</div></div><div class="border rounded-xl p-4 text-center floaty"><b>mail.acme.edu</b><div class="text-xs text-slate-500 mt-1">Recipient MTA</div></div></div><div class="mt-5 p-4 rounded-lg bg-slate-50 border text-sm">Observed hops are separated from inferred origin. Earlier Received headers can require trust evaluation.</div>`);
+$('architectureBtn').onclick=()=>modal('MAILTRACE AI — Architecture','MVP implementation + production evolution',`<div class="rounded-xl border bg-slate-50 p-3 overflow-auto"><svg viewBox="0 0 980 500" class="w-full min-w-[780px] h-[450px]"><defs><marker id="mtArrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker></defs><g font-family="Arial" text-anchor="middle"><path class="arch-line" marker-end="url(#mtArrow)" d="M150 85 H270"/><path class="arch-line" marker-end="url(#mtArrow)" d="M380 85 H510"/><path class="arch-line" marker-end="url(#mtArrow)" d="M620 85 H760"/><path class="arch-line" marker-end="url(#mtArrow)" d="M565 130 V230"/><path class="arch-line" marker-end="url(#mtArrow)" d="M510 278 H320"/><path class="arch-line" marker-end="url(#mtArrow)" d="M620 278 H820"/><path class="arch-line" marker-end="url(#mtArrow)" d="M565 325 V400"/><path class="arch-line" marker-end="url(#mtArrow)" d="M565 400 H410"/><path class="arch-line" marker-end="url(#mtArrow)" d="M565 400 H720"/>\n<rect x="25" y="45" width="125" height="80" rx="15" fill="white" stroke="#cbd5e1"/><text x="87" y="78" font-size="14">Email / .eml</text><text x="87" y="101" font-size="10" fill="#64748b">Gmail / M365 later</text>\n<rect x="270" y="45" width="110" height="80" rx="15" fill="white" stroke="#cbd5e1"/><text x="325" y="78" font-size="14">FastAPI</text><text x="325" y="101" font-size="10" fill="#64748b">ingestion</text>\n<rect x="510" y="45" width="110" height="80" rx="15" fill="white" stroke="#cbd5e1"/><text x="565" y="78" font-size="14">Forensics</text><text x="565" y="101" font-size="10" fill="#64748b">headers + auth</text>\n<rect x="760" y="45" width="180" height="80" rx="15" fill="white" stroke="#cbd5e1"/><text x="850" y="78" font-size="14">AI Detection</text><text x="850" y="101" font-size="10" fill="#64748b">NLP + rules + structural</text>\n<rect x="470" y="230" width="190" height="95" rx="18" fill="#0f172a"/><text x="565" y="268" font-size="15" fill="white">Evidence Fusion</text><text x="565" y="291" font-size="10" fill="#cbd5e1">risk + confidence + XAI</text>\n<rect x="200" y="230" width="120" height="95" rx="15" fill="white" stroke="#cbd5e1"/><text x="260" y="268" font-size="13">TI Enrichment</text><text x="260" y="291" font-size="10" fill="#64748b">RDAP / DNS / GeoIP</text>\n<rect x="820" y="230" width="120" height="95" rx="15" fill="white" stroke="#cbd5e1"/><text x="880" y="268" font-size="13">Graph</text><text x="880" y="291" font-size="10" fill="#64748b">campaign links</text>\n<rect x="290" y="395" width="240" height="60" rx="14" fill="white" stroke="#cbd5e1"/><text x="410" y="431" font-size="13">React Investigation Dashboard</text>\n<rect x="600" y="395" width="240" height="60" rx="14" fill="white" stroke="#cbd5e1"/><text x="720" y="431" font-size="13">PostgreSQL + Evidence Store</text></g></svg></div><div class="mt-4 grid md:grid-cols-3 gap-3 text-xs"><div class="border rounded-lg p-3"><b>36h MVP</b><br>NetworkX + local evidence + optional TI</div><div class="border rounded-lg p-3"><b>Judge flow</b><br>Detect → Explain → Trace → Correlate → Report</div><div class="border rounded-lg p-3"><b>Production path</b><br>Gmail/M365 + providers + Neo4j/S3</div></div>`);
+$('reportBtn').onclick=()=>{const d=DATA[current];const report=`MAILTRACE AI — FORENSIC INTELLIGENCE REPORT\n=======================================\nCASE: CASE-26106-00042\nSUBJECT: ${d.subject}\nRISK: ${d.risk}/100\nVERDICT: ${d.verdict}\n\nEXPLAINABLE EVIDENCE\n${d.reasons.map((r,i)=>`${i+1}. ${r[0]} ${r[1]} — ${r[2]}`).join('\n')}\n\nAUTHENTICATION\n${d.auth.slice(0,3).map(r=>r[0]+': '+r[1]).join('\n')}\n\nINFRASTRUCTURE\nObserved IP: ${d.auth[4][1]}\nGeo observation: ${d.auth[5][1]}\n\nGRAPH / CAMPAIGN\nShared indicators and infrastructure relationships were evaluated.\n\nEVIDENCE INTEGRITY\nSHA-256 fingerprint: captured\nAudit event: analysis completed\n\nLIMITATION\nThis evidence supports investigation of infrastructure and relationships; it does not establish human identity or exact physical location.\n\nDEMO NOTE\nSynthetic simulation data.`;const blob=new Blob([report],{type:'text/plain;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='MAILTRACE_CASE-26106-00042_report.txt';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),600);toast('Forensic report generated')};
+$('xaiBtn').onclick=()=>{const d=DATA[current];modal('Explainable AI — Decision Explorer','How evidence becomes a verdict',`<div class="grid lg:grid-cols-2 gap-5"><div class="border rounded-xl p-4"><div class="text-xs uppercase tracking-wider text-slate-400">Risk decision</div><div class="text-5xl font-bold mt-1">${d.risk}/100</div><div class="mt-2 inline-flex px-2 py-1 rounded-full ${d.risk>=80?'signal-bad':d.risk>=50?'signal-warn':'signal-good'}">${esc(d.verdict)}</div></div><div class="border rounded-xl p-4"><div class="font-semibold">Top contributions</div><div class="mt-3 space-y-3">${d.reasons.map(r=>`<div><div class="flex justify-between text-xs mb-1"><span>${esc(r[0])}</span><b>${esc(r[1])}</b></div><div class="xai-bar"><div class="xai-fill bg-slate-700" style="width:${Math.min(100,Math.max(0,parseInt(r[1].replace('+',''))||0)*4)}%"></div></div></div>`).join('')}</div></div></div><div class="mt-5 border rounded-xl p-4"><div class="font-semibold">Implementation note</div><p class="text-sm text-slate-600 mt-2">This demo uses deterministic synthetic contributions to make the reasoning visible. In production, actual model features can be explained with SHAP-style attributions and calibration on held-out validation data.</p></div>`)};
+$('scanBtn').onclick=scan;
+window.addEventListener('keydown',e=>{if(e.key==='1')openMail('bec');if(e.key==='2')openMail('phishing');if(e.key==='3')openMail('legitimate');if(e.key.toLowerCase()==='s'&&!$('readerView').classList.contains('hidden'))scan()});
+</script>
+</body>
+</html>
