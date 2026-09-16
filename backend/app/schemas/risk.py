@@ -35,6 +35,7 @@ class RiskDimensions(BaseModel):
     identity_consistency: float = 0.0
     url_risk: float = 0.0
     infrastructure_risk: float = 0.0
+    campaign_risk: float = 0.0
     bec_risk: float = 0.0
 
 
@@ -57,3 +58,24 @@ class RiskAssessment(BaseModel):
         if v is not None and v not in RiskClassification:
             raise ValueError(f"Invalid classification: {v}. Must be one of {[e.value for e in RiskClassification]}")
         return v
+
+
+class CaseAnalyzeResponse(BaseModel):
+    case_id: str
+    status: str = "ANALYZED"
+    ai_prediction: dict = Field(default_factory=dict)
+    ai_confidence: float = 0.0
+    extracted_features: dict = Field(default_factory=dict)
+    risk_score: int = Field(ge=0, le=100)
+    risk_level: RiskClassification
+    risk_contributions: dict = Field(default_factory=dict)
+    infrastructure: dict = Field(default_factory=dict)
+    dns: dict = Field(default_factory=dict)
+    rdap: dict = Field(default_factory=dict)
+    geoip: dict = Field(default_factory=dict)
+    infrastructure_score: int = 0
+    graph: dict = Field(default_factory=dict)
+    correlation: dict = Field(default_factory=dict)
+    timeline: List[dict] = Field(default_factory=list)
+    campaign_score: int = 0
+    explanations: List[str] = Field(default_factory=list)

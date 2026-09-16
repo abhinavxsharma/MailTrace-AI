@@ -42,6 +42,8 @@ from app.schemas.graph import (
 )
 from app.schemas.report import ReportSchema
 from app.schemas.analysis import AnalysisResult, CaseDetailResponse
+from app.schemas.timeline import TimelineItem
+from app.schemas.correlation import CorrelationResponse
 
 __all__ = [
     "CaseStatus",
@@ -74,6 +76,8 @@ __all__ = [
     "GraphEdgeData",
     "GraphEdge",
     "GraphResponse",
+    "TimelineItem",
+    "CorrelationResponse",
     "ReportSchema",
     "AnalysisResult",
     "CaseDetailResponse",

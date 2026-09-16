@@ -4,9 +4,10 @@ Provides case upload, parsing orchestration, verification workflow, metadata que
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -22,6 +23,7 @@ from app.schemas.verification import (
     AuthenticationSchema,
     IdentitySchema,
 )
+from app.schemas.risk import CaseAnalyzeResponse
 from app.schemas.email import EmailSchema
 from app.schemas.indicator import IndicatorSchema
 from app.schemas.analysis import CaseDetailResponse
@@ -40,11 +42,29 @@ from app.forensics.headers import analyze_identity_consistency, extract_core_hea
 from app.forensics.received import analyze_received_chain
 from app.forensics.indicators import extract_indicators
 from app.forensics.authentication import verify_email_authentication
+from app.detection.classifier import get_classifier, strip_html_tags
+from app.detection.features import extract_forensic_features
+from app.detection.risk_fusion import fuse_evidence
+from app.intelligence import enrich_indicators
+from app.graph import build_case_graph, correlate_case, build_case_timeline
+from app.reports import build_case_report, generate_json_report, generate_pdf_report
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
 
 # Maximum allowed file size: 10 MB
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
+
+CASE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
+
+
+def validate_case_id(case_id: str) -> str:
+    """Validate case identifier to prevent directory traversal or malformed path input."""
+    if not case_id or not CASE_ID_PATTERN.match(case_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Case ID format. Must be 1-64 alphanumeric characters, hyphens, or underscores.",
+        )
+    return case_id
 
 
 @router.post(
@@ -61,14 +81,19 @@ async def upload_case_eml(
     """
     Ingest a real .eml file, preserve original bytes, and extract initial forensic structures.
     """
-    filename = file.filename or "unknown.eml"
+    raw_filename = file.filename or "unknown.eml"
+    clean_filename = Path(raw_filename.replace("\x00", "")).name
+    clean_filename = re.sub(r"[^\w\.\-\s]", "_", clean_filename).strip()
+    if not clean_filename or clean_filename == ".eml":
+        clean_filename = "evidence.eml"
 
     # 1. Validate file extension (case-insensitive)
-    if not filename.lower().endswith(".eml"):
+    if not clean_filename.lower().endswith(".eml"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported file format. Only .eml files are accepted for forensic analysis.",
         )
+    filename = clean_filename
 
     # 2. Read raw bytes and validate size
     try:
@@ -240,6 +265,7 @@ def verify_case_authentication(
     Run email verification workflow on a parsed case.
     Evaluates SPF, DKIM, DMARC, alignment, and identity consistency.
     """
+    validate_case_id(case_id)
     case = get_case(db=db, case_id=case_id)
     if not case:
         raise HTTPException(
@@ -247,8 +273,8 @@ def verify_case_authentication(
             detail=f"Case '{case_id}' not found.",
         )
 
-    # Must be at least PARSED or already VERIFIED
-    if case.status not in (CaseStatus.PARSED.value, CaseStatus.VERIFIED.value):
+    # Must be at least PARSED, VERIFIED, ANALYZED, or REPORTED
+    if case.status not in (CaseStatus.PARSED.value, CaseStatus.VERIFIED.value, CaseStatus.ANALYZED.value, CaseStatus.REPORTED.value):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Case '{case_id}' has status '{case.status}'. Cases must be PARSED before running verification.",
@@ -340,6 +366,7 @@ def get_case_authentication(
     db: Session = Depends(get_db),
 ):
     """Retrieve normalized authentication verification object for a case."""
+    validate_case_id(case_id)
     case = get_case(db=db, case_id=case_id)
     if not case:
         raise HTTPException(
@@ -354,6 +381,314 @@ def get_case_authentication(
         return AuthenticationSchema(**auth_data)
     except Exception:
         return AuthenticationSchema()
+
+
+@router.post(
+    "/{case_id}/analyze",
+    response_model=CaseAnalyzeResponse,
+    summary="Run AI threat detection, forensic feature extraction, and risk fusion",
+    description="Analyzes email content using fine-tuned DistilBERT model, extracts linguistic/identity signals, and generates a calibrated 0-100 risk score.",
+)
+def analyze_case_threat(
+    case_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Run full threat analysis pipeline: AI classification, feature extraction,
+    passive infrastructure intelligence, relationship graph, timeline, and risk fusion.
+    """
+    validate_case_id(case_id)
+    case = get_case(db=db, case_id=case_id)
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case '{case_id}' not found.",
+        )
+
+    # Must be at least PARSED, VERIFIED, ANALYZED, or REPORTED
+    valid_statuses = (CaseStatus.PARSED.value, CaseStatus.VERIFIED.value, CaseStatus.ANALYZED.value, CaseStatus.REPORTED.value)
+    if case.status not in valid_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Case '{case_id}' has status '{case.status}'. Cases must be PARSED before running analysis.",
+        )
+
+    # Locate raw .eml file
+    evidence_path = None
+    if case.evidences:
+        candidate = Path(case.evidences[0].path)
+        if candidate.exists():
+            evidence_path = candidate
+
+    if not evidence_path:
+        default_path = Path("evidence") / case.case_number / "raw.eml"
+        if default_path.exists():
+            evidence_path = default_path
+
+    if not evidence_path or not evidence_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Preserved evidence artifact not found for case '{case_id}'.",
+        )
+
+    # Load existing parsed analysis data
+    analysis_data: Dict[str, Any] = {}
+    if case.analysis_json:
+        try:
+            analysis_data = json.loads(case.analysis_json)
+        except Exception:
+            analysis_data = {}
+
+    email_dict = analysis_data.get("email", {})
+    email_schema = EmailSchema(**email_dict)
+    indicators_raw = analysis_data.get("indicators", [])
+    indicators = [IndicatorSchema(**item) for item in indicators_raw]
+    raw_headers = analysis_data.get("raw_headers", {})
+    source_ip = analysis_data.get("infrastructure", {}).get("source_ip")
+
+    # If authentication hasn't been evaluated yet, evaluate it
+    auth_data = analysis_data.get("authentication")
+    if not auth_data:
+        raw_bytes = evidence_path.read_bytes()
+        auth_schema = verify_email_authentication(
+            raw_bytes=raw_bytes,
+            email_schema=email_schema,
+            raw_headers=raw_headers,
+            source_ip=source_ip,
+        )
+        analysis_data["authentication"] = auth_schema.model_dump()
+    else:
+        auth_schema = AuthenticationSchema(**auth_data)
+
+    # Identity schema
+    identity_data = analysis_data.get("identity")
+    if not identity_data:
+        identity_schema = analyze_identity_consistency(
+            from_header=email_schema.from_address,
+            reply_to_header=email_schema.reply_to,
+            return_path_header=email_schema.return_path,
+        )
+        analysis_data["identity"] = identity_schema.model_dump()
+    else:
+        identity_schema = IdentitySchema(**identity_data)
+
+    # 1. AI Threat Classifier
+    classifier = get_classifier()
+    detection_schema = classifier.classify_email(
+        subject=email_schema.subject,
+        body_text=email_schema.body_text,
+        body_html=email_schema.body_html,
+    )
+
+    # Raw model prediction details
+    plain_body = email_schema.body_text or (strip_html_tags(email_schema.body_html) if email_schema.body_html else "")
+    input_text = f"Subject: {email_schema.subject or ''}\n\n{plain_body}".strip()
+    ai_pred = classifier.predict(input_text)
+    ai_confidence = float(ai_pred.get("confidence") or 0.0)
+
+    # 2. Forensic Feature Extraction
+    extracted_features = extract_forensic_features(
+        email=email_schema,
+        indicators=indicators,
+        identity=identity_schema,
+    )
+
+    # 3. Infrastructure Intelligence Enrichment (DNS, RDAP, GeoIP)
+    sender_domain = None
+    if email_schema.from_address and "@" in email_schema.from_address:
+        sender_domain = email_schema.from_address.split("@", 1)[1].strip(">").strip()
+
+    infra_intel = enrich_indicators(
+        indicators=indicators,
+        source_ip=source_ip,
+        sender_domain=sender_domain,
+    )
+
+    # 4. Cross-Case Campaign Correlation
+    correlation_result = correlate_case(db=db, target_case=case)
+    campaign_score = correlation_result.get("campaign_score", 0)
+
+    # 5. Evidence Fusion & Risk Scoring
+    fusion_result = fuse_evidence(
+        ai_prediction=ai_pred,
+        features=extracted_features,
+        authentication=auth_schema,
+        identity=identity_schema,
+        observed_source_ip=source_ip,
+        infrastructure_intelligence=infra_intel,
+        campaign_correlation=correlation_result,
+    )
+
+    risk_score = fusion_result["risk_score"]
+    risk_level = fusion_result["risk_level"]
+    risk_assessment = fusion_result["risk_assessment"]
+    risk_contributions = fusion_result["risk_contributions"]
+    infrastructure_score = fusion_result.get("infrastructure_score", 0)
+    campaign_score = fusion_result.get("campaign_score", campaign_score)
+    explanations = fusion_result["explanations"]
+
+    # 6. Graph Construction (NetworkX Cytoscape format)
+    analysis_data["detection"] = detection_schema.model_dump()
+    analysis_data["features"] = extracted_features
+    analysis_data["infrastructure"] = infra_intel["infrastructure_schema"].model_dump()
+    analysis_data["dns"] = infra_intel["dns"]
+    analysis_data["rdap"] = infra_intel["rdap"]
+    analysis_data["geoip"] = infra_intel["geoip"]
+    analysis_data["infrastructure_score"] = infrastructure_score
+    analysis_data["correlation"] = correlation_result
+    analysis_data["campaign_score"] = campaign_score
+
+    graph_data = build_case_graph(analysis_data, case.case_number)
+    timeline_data = build_case_timeline(
+        analysis_data,
+        audit_events=case.audit_events,
+        correlation_result=correlation_result,
+    )
+
+    analysis_data["graph"] = graph_data
+    analysis_data["timeline"] = timeline_data
+    analysis_data["risk_score"] = risk_score
+    analysis_data["classification"] = risk_level.value
+    analysis_data["confidence"] = ai_confidence
+    analysis_data["risk_dimensions"] = risk_assessment.dimensions.model_dump()
+    analysis_data["reasons"] = [r.model_dump() for r in risk_assessment.reasons]
+    analysis_data["risk_contributions"] = risk_contributions
+    analysis_data["explanations"] = explanations
+
+    # Update Case database model
+    case.risk_score = risk_score
+    case.classification = risk_level.value
+    case.confidence = ai_confidence
+    case.analysis_json = json.dumps(analysis_data)
+    db.commit()
+
+    # Advance status to ANALYZED
+    update_case_status(
+        db=db,
+        case=case,
+        status=CaseStatus.ANALYZED,
+        description=f"Analysis complete. Score: {risk_score} ({risk_level.value}), AI: {ai_pred.get('label')}.",
+    )
+    record_audit_event(
+        db=db,
+        case_id=case.id,
+        event_type="ANALYZED",
+        description=f"Risk: {risk_score} | Level: {risk_level.value} | Model: {ai_pred.get('model')} | Confidence: {ai_confidence:.4f}",
+    )
+
+    return CaseAnalyzeResponse(
+        case_id=case.case_number,
+        status=CaseStatus.ANALYZED.value,
+        ai_prediction=ai_pred,
+        ai_confidence=ai_confidence,
+        extracted_features=extracted_features,
+        risk_score=risk_score,
+        risk_level=risk_level,
+        risk_contributions=risk_contributions,
+        infrastructure=infra_intel["infrastructure_schema"].model_dump(),
+        dns=infra_intel["dns"],
+        rdap=infra_intel["rdap"],
+        geoip=infra_intel["geoip"],
+        infrastructure_score=infrastructure_score,
+        graph=graph_data,
+        correlation=correlation_result,
+        timeline=timeline_data,
+        campaign_score=campaign_score,
+        explanations=explanations,
+    )
+
+
+@router.get(
+    "/{case_id}/graph",
+    response_model=Dict[str, Any],
+    summary="Get forensic relationship graph for a case",
+    description="Returns Cytoscape.js compatible nodes and edges representing email entities, domains, IPs, and infrastructure.",
+)
+def get_case_graph(
+    case_id: str,
+    db: Session = Depends(get_db),
+):
+    """Retrieve Cytoscape.js relationship graph for a case."""
+    validate_case_id(case_id)
+    case = get_case(db=db, case_id=case_id)
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case '{case_id}' not found.",
+        )
+    if not case.analysis_json:
+        return {"nodes": [], "edges": [], "node_count": 0, "edge_count": 0}
+    try:
+        data = json.loads(case.analysis_json)
+        return data.get("graph") or build_case_graph(data, case.case_number)
+    except Exception:
+        return {"nodes": [], "edges": [], "node_count": 0, "edge_count": 0}
+
+
+@router.get(
+    "/{case_id}/timeline",
+    response_model=List[Dict[str, Any]],
+    summary="Get chronological forensic timeline for a case",
+    description="Returns ordered timeline milestones from email dispatch through forensic verification and correlation.",
+)
+def get_case_timeline(
+    case_id: str,
+    db: Session = Depends(get_db),
+):
+    """Retrieve chronological forensic timeline for a case."""
+    validate_case_id(case_id)
+    case = get_case(db=db, case_id=case_id)
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case '{case_id}' not found.",
+        )
+    if not case.analysis_json:
+        return []
+    try:
+        data = json.loads(case.analysis_json)
+        return data.get("timeline") or build_case_timeline(data, audit_events=case.audit_events)
+    except Exception:
+        return []
+
+
+@router.get(
+    "/{case_id}/correlation",
+    response_model=Dict[str, Any],
+    summary="Get cross-case campaign correlation for a case",
+    description="Returns related investigations sharing threat indicators, relationship strength, and shared observables.",
+)
+def get_case_correlation(
+    case_id: str,
+    db: Session = Depends(get_db),
+):
+    """Retrieve cross-case campaign correlation results for a case."""
+    validate_case_id(case_id)
+    case = get_case(db=db, case_id=case_id)
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case '{case_id}' not found.",
+        )
+    if not case.analysis_json:
+        return {
+            "related_case_ids": [],
+            "shared_indicators": [],
+            "relationship_strength": "NONE",
+            "correlation_reasons": [],
+            "campaign_score": 0,
+        }
+    try:
+        data = json.loads(case.analysis_json)
+        return data.get("correlation") or correlate_case(db=db, target_case=case)
+    except Exception:
+        return {
+            "related_case_ids": [],
+            "shared_indicators": [],
+            "relationship_strength": "NONE",
+            "correlation_reasons": [],
+            "campaign_score": 0,
+        }
 
 
 @router.post(
@@ -390,6 +725,7 @@ def get_case_detail(
     db: Session = Depends(get_db),
 ):
     """Retrieve full case details by case number (e.g. MT-2026-000001) or internal ID."""
+    validate_case_id(case_id)
     case = get_case(db=db, case_id=case_id)
     if not case:
         raise HTTPException(
@@ -410,6 +746,7 @@ def get_case_headers(
     db: Session = Depends(get_db),
 ):
     """Retrieve structured headers extracted during email ingestion."""
+    validate_case_id(case_id)
     case = get_case(db=db, case_id=case_id)
     if not case:
         raise HTTPException(
@@ -436,6 +773,7 @@ def get_case_indicators(
     db: Session = Depends(get_db),
 ):
     """Retrieve indicators of compromise extracted from the email."""
+    validate_case_id(case_id)
     case = get_case(db=db, case_id=case_id)
     if not case:
         raise HTTPException(
@@ -463,6 +801,7 @@ def get_case_evidence(
     db: Session = Depends(get_db),
 ):
     """Retrieve evidence chain-of-custody records for the case."""
+    validate_case_id(case_id)
     case = get_case(db=db, case_id=case_id)
     if not case:
         raise HTTPException(
@@ -481,3 +820,190 @@ def get_case_evidence(
         }
         for ev in case.evidences
     ]
+
+
+@router.get(
+    "/{case_id}/report",
+    response_model=Dict[str, Any],
+    summary="Get structured forensic report object for a case",
+    description="Returns full machine-readable forensic report data including AI results, authentication, infrastructure, graph, correlation, timeline, and risk analysis.",
+)
+def get_case_report_data(
+    case_id: str,
+    db: Session = Depends(get_db),
+):
+    """Retrieve full assembled forensic case report object."""
+    validate_case_id(case_id)
+    case = get_case(db=db, case_id=case_id)
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case '{case_id}' not found.",
+        )
+    if case.status not in (CaseStatus.ANALYZED.value, CaseStatus.REPORTED.value, CaseStatus.CORRELATED.value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Forensic report cannot be generated for case '{case_id}' with status '{case.status}'. Cases must be ANALYZED before report generation.",
+        )
+    try:
+        report_data = build_case_report(db=db, case_identifier=case.case_number)
+        return report_data
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to assemble forensic report: {str(e)}",
+        )
+
+
+@router.get(
+    "/{case_id}/report/json",
+    summary="Download forensic case report as JSON",
+    description="Generates, persists, and returns a machine-readable JSON forensic investigation report.",
+)
+def download_case_report_json(
+    case_id: str,
+    db: Session = Depends(get_db),
+):
+    """Download forensic report in JSON format."""
+    validate_case_id(case_id)
+    case = get_case(db=db, case_id=case_id)
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case '{case_id}' not found.",
+        )
+    if case.status not in (CaseStatus.ANALYZED.value, CaseStatus.REPORTED.value, CaseStatus.CORRELATED.value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Forensic report cannot be generated for case '{case_id}' with status '{case.status}'. Cases must be ANALYZED before report generation.",
+        )
+    try:
+        report_data = build_case_report(db=db, case_identifier=case.case_number)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+    # Persist report file
+    report_dir = Path("reports") / case.case_number
+    report_dir.mkdir(parents=True, exist_ok=True)
+    json_path = report_dir / "forensic_report.json"
+    json_str = generate_json_report(report_data=report_data, output_path=json_path)
+
+    # Persist report metadata in analysis_json if present
+    if case.analysis_json:
+        try:
+            adata = json.loads(case.analysis_json)
+            if "reports" not in adata:
+                adata["reports"] = {}
+            adata["reports"]["json_path"] = str(json_path)
+            adata["reports"]["last_generated_at"] = report_data.get("generation_timestamp")
+            case.analysis_json = json.dumps(adata)
+            db.commit()
+        except Exception:
+            pass
+
+    # Update case status to REPORTED if currently ANALYZED
+    if case.status == CaseStatus.ANALYZED.value:
+        update_case_status(
+            db=db,
+            case=case,
+            status=CaseStatus.REPORTED,
+            description="Forensic JSON report generated and preserved.",
+        )
+
+    record_audit_event(
+        db=db,
+        case_id=case.id,
+        event_type="REPORT_GENERATED",
+        description=f"Forensic report exported in JSON format to {json_path}.",
+    )
+
+    filename = f"forensic_report_{case.case_number}.json"
+    return Response(
+        content=json_str,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@router.get(
+    "/{case_id}/report/pdf",
+    summary="Download forensic case report as PDF",
+    description="Generates, persists, and returns a courtroom-ready PDF forensic investigation report.",
+)
+def download_case_report_pdf(
+    case_id: str,
+    db: Session = Depends(get_db),
+):
+    """Download forensic report in PDF format."""
+    validate_case_id(case_id)
+    case = get_case(db=db, case_id=case_id)
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Case '{case_id}' not found.",
+        )
+    if case.status not in (CaseStatus.ANALYZED.value, CaseStatus.REPORTED.value, CaseStatus.CORRELATED.value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Forensic report cannot be generated for case '{case_id}' with status '{case.status}'. Cases must be ANALYZED before report generation.",
+        )
+    try:
+        report_data = build_case_report(db=db, case_identifier=case.case_number)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+    # Persist report file
+    report_dir = Path("reports") / case.case_number
+    report_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = report_dir / "forensic_report.pdf"
+    pdf_bytes = generate_pdf_report(report_data=report_data, output_path=pdf_path)
+
+    # Persist report metadata in analysis_json if present
+    if case.analysis_json:
+        try:
+            adata = json.loads(case.analysis_json)
+            if "reports" not in adata:
+                adata["reports"] = {}
+            adata["reports"]["pdf_path"] = str(pdf_path)
+            adata["reports"]["last_generated_at"] = report_data.get("generation_timestamp")
+            case.analysis_json = json.dumps(adata)
+            db.commit()
+        except Exception:
+            pass
+
+    # Update case status to REPORTED if currently ANALYZED
+    if case.status == CaseStatus.ANALYZED.value:
+        update_case_status(
+            db=db,
+            case=case,
+            status=CaseStatus.REPORTED,
+            description="Forensic PDF report generated and preserved.",
+        )
+
+    record_audit_event(
+        db=db,
+        case_id=case.id,
+        event_type="REPORT_GENERATED",
+        description=f"Forensic report exported in PDF format to {pdf_path}.",
+    )
+
+    filename = f"forensic_report_{case.case_number}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+

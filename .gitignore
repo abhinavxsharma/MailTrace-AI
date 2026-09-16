@@ -33,4 +33,8 @@ reports/*/
 evidence/generated/
 evidence/*/
 
-
+# Large model weights (>100MB)
+*.safetensors
+*.pt
+*.bin
+*.onnx

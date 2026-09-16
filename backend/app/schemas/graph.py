@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 class GraphNodeData(BaseModel):
     id: str
     label: Optional[str] = None
-    type: Optional[str] = None  # e.g., "case", "domain", "ip", "url", "campaign"
+    type: Optional[str] = None  # e.g., "email", "sender", "domain", "ip", "url", "infrastructure"
+    value: Optional[str] = None
     extra: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -22,6 +23,7 @@ class GraphEdgeData(BaseModel):
     source: str
     target: str
     label: Optional[str] = None  # e.g., "SENT_FROM", "RESOLVES_TO", "CONTAINS"
+    relationship: Optional[str] = None
     extra: Dict[str, Any] = Field(default_factory=dict)
 
 

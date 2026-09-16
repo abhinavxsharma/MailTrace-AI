@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     MAXMIND_DB_PATH: str = ""
     VIRUSTOTAL_API_KEY: str = ""
 
+    # AI / ML Threat Detection Model (Dataset 3 Fine-Tuned DistilBERT)
+    MODEL_PATH: str = "ml/models/dataset3_v1.0.0"
+    MODEL_MAX_LENGTH: int = 384
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

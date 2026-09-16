@@ -36,6 +36,11 @@ def preserve_evidence(
         FileExistsError: If evidence file already exists and overwrite is False.
         ValueError: If read-back integrity check fails.
     """
+    if ".." in case_id or "/" in case_id or "\\" in case_id:
+        raise ValueError(f"Invalid case_id '{case_id}' contains path traversal characters.")
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise ValueError(f"Invalid filename '{filename}' contains path traversal characters.")
+
     case_dir = Path(base_dir) / case_id
     case_dir.mkdir(parents=True, exist_ok=True)
 

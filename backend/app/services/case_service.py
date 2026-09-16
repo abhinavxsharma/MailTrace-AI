@@ -157,11 +157,15 @@ def case_to_response(case: Case) -> CaseDetailResponse:
             data = {}
 
     classification_val = None
-    if case.classification:
+    raw_class = case.classification or data.get("classification")
+    if raw_class:
         try:
-            classification_val = RiskClassification(case.classification)
+            classification_val = RiskClassification(raw_class)
         except ValueError:
             classification_val = None
+
+    risk_score_val = case.risk_score if case.risk_score is not None else data.get("risk_score")
+    confidence_val = case.confidence if case.confidence is not None else data.get("confidence")
 
     # Derive evidence payload if not explicitly present in analysis data
     evidence_payload = data.get("evidence", {})
@@ -177,9 +181,9 @@ def case_to_response(case: Case) -> CaseDetailResponse:
     return CaseDetailResponse(
         case_id=case.case_number,
         status=CaseStatus(case.status) if case.status in [s.value for s in CaseStatus] else CaseStatus.UPLOADED,
-        risk_score=case.risk_score,
+        risk_score=risk_score_val,
         classification=classification_val,
-        confidence=case.confidence,
+        confidence=confidence_val,
         email=data.get("email", EmailSchema()),
         authentication=data.get("authentication", AuthenticationSchema()),
         identity=data.get("identity", IdentitySchema()),
